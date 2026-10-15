@@ -155,6 +155,10 @@ details.log[open] summary .arr{transform:rotate(90deg)}
     <button class="btn" id="setBtn" type="button">Başlangıç değerleri</button>
     <button class="btn" id="bakBtn" type="button">Yedek al</button>
     <label class="btn" for="bakIn">Yedek yükle</label><input id="bakIn" type="file" accept=".json,application/json" hidden>
+    <button class="btn" id="cloudBtn" type="button">Bulut yedek</button>
+  </div>
+  <div class="foot" id="cloudLbl">Bulut yedek: kapalı</div>
+  <div hidden>
   </div>
 </div>
 <div id="sheetHost"></div>
@@ -173,13 +177,50 @@ const MONTHS=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas
 let db, downloads=true, entries={}, history={}, openCard=null, dbState='wait';
 
 const LS_KEY='yoklama_v1';const SEED={"history":{"EE303":{"course":"EE303","weeks":{},"attendedBase":12},"MATH380":{"course":"MATH380","weeks":{"2":4,"3":2,"4":1},"attendedBase":6},"MECE303":{"course":"MECE303","weeks":{"4":2},"attendedBase":10},"IE220":{"course":"IE220","weeks":{"2":1,"3":1,"4":1},"attendedBase":6},"FE301":{"course":"FE301","weeks":{},"attendedBase":9}},"entries":{"2026-10-14":{"date":"2026-10-14","week":5,"items":{"MATH380":{"attended":2,"sched":3,"status":"on"},"MECE303":{"attended":0,"sched":2,"status":"on"}}}}};
-function persist(){try{localStorage.setItem(LS_KEY,JSON.stringify({history,entries}))}catch(e){toast('Kaydedilemedi: tarayıcı depolaması kapalı')}}
+function persist(){try{localStorage.setItem(LS_KEY,JSON.stringify({history,entries}))}catch(e){toast('Kaydedilemedi: tarayıcı depolaması kapalı')}scheduleCloud()}
 function loadStore(){let o=null;try{o=JSON.parse(localStorage.getItem(LS_KEY)||'null')}catch(e){}if(!o){o=JSON.parse(JSON.stringify(SEED));try{localStorage.setItem(LS_KEY,JSON.stringify(o))}catch(e){}}history=o.history||{};entries=o.entries||{};dbState='ok'}
 db={collection:name=>({doc:id=>({
   set:async data=>{(name==='entries'?entries:history)[id]=data;persist();render()},
   update:async data=>{const t=name==='entries'?entries:history;t[id]={...(t[id]||{}),...data};persist();render()},
   delete:async()=>{delete (name==='entries'?entries:history)[id];persist();render()}
 })})};
+
+const CK='yoklama_cloud';
+function cloudCfg(){try{return JSON.parse(localStorage.getItem(CK)||'null')}catch(e){return null}}
+function setCloudCfg(c){try{localStorage.setItem(CK,JSON.stringify(c))}catch(e){}}
+const b64e=s=>btoa(unescape(encodeURIComponent(s)));
+const b64d=s=>decodeURIComponent(escape(atob(s.replace(/\s/g,''))));
+function gh(c,method,body){return fetch('https://api.github.com/repos/'+c.repo+'/contents/data.json',{method,cache:'no-store',headers:{Authorization:'Bearer '+c.token,Accept:'application/vnd.github+json'},body:body?JSON.stringify(body):undefined})}
+let cloudTimer=null,cloudErr='';
+function scheduleCloud(){const c=cloudCfg();if(!c||!c.token)return;clearTimeout(cloudTimer);cloudTimer=setTimeout(()=>cloudBackup(false),1500)}
+async function cloudBackup(manual){
+  const c=cloudCfg();if(!c||!c.token){if(manual)toast('Önce bulut ayarlarını gir');return false}
+  try{let sha;const g=await gh(c,'GET');
+    if(g.ok)sha=(await g.json()).sha;else if(g.status!==404)throw new Error(g.status===401?'token geçersiz':'HTTP '+g.status);
+    const now=new Date();const content=b64e(JSON.stringify({history,entries,savedAt:now.toISOString()},null,1));
+    const r=await gh(c,'PUT',{message:'Yoklama yedek '+keyOf(now)+' '+pad(now.getHours())+':'+pad(now.getMinutes()),content,sha});
+    if(!r.ok)throw new Error(r.status===404?'repo bulunamadı':r.status===403?'token yazma izni yok':'HTTP '+r.status);
+    c.last=now.toISOString();c.lastDay=keyOf(now);setCloudCfg(c);cloudErr='';renderCloud();if(manual)toast('Buluta yedeklendi');return true}
+  catch(e){cloudErr=e.message||'bağlantı yok';renderCloud();if(manual)toast('Yedeklenemedi: '+cloudErr);return false}}
+async function cloudRestore(){
+  const c=cloudCfg();if(!c||!c.token){toast('Önce bulut ayarlarını gir');return}
+  try{const g=await gh(c,'GET');if(!g.ok)throw new Error(g.status===404?'yedek yok':'HTTP '+g.status);
+    const o=JSON.parse(b64d((await g.json()).content));if(!o.history||!o.entries)throw new Error('dosya bozuk');
+    history=o.history;entries=o.entries;try{localStorage.setItem(LS_KEY,JSON.stringify({history,entries}))}catch(e){}
+    render();toast('Buluttan geri yüklendi');closeSheet()}catch(e){toast('Geri yüklenemedi: '+e.message)}}
+function renderCloud(){const el=document.getElementById('cloudLbl');if(!el)return;const c=cloudCfg();
+  if(!c||!c.token){el.textContent='Bulut yedek: kapalı. Telefon silinirse kayıtlar gider.';return}
+  if(cloudErr){el.textContent='Bulut yedek hatası: '+cloudErr;return}
+  if(c.last){const d=new Date(c.last);el.textContent='Son bulut yedeği: '+d.getDate()+' '+MONTHS[d.getMonth()]+' '+pad(d.getHours())+':'+pad(d.getMinutes())+' · '+c.repo}else el.textContent='Bulut yedek açık · '+c.repo}
+let confirmRestore=false;
+function openCloud(){const c=cloudCfg()||{};confirmRestore=false;
+  $('sheetHost').innerHTML=`<div class="sheet-bg" data-close="1"><div class="sheet" role="dialog" aria-label="Bulut yedek">
+   <h3>Bulut yedek (GitHub)</h3>
+   <div class="q">Her kayıttan sonra ve her gün ilk açılışta veriler private bir GitHub reposuna data.json olarak yazılır. Her yedek ayrı commit, yani geçmiş günlere dönebilirsin.</div>
+   <label class="srow" for="cloud-repo"><b>Repo</b><input id="cloud-repo" type="text" style="width:60%;text-align:left" autocapitalize="off" autocorrect="off" spellcheck="false" value="${c.repo||'Efe-Demir/yoklama-data'}"></label>
+   <label class="srow" for="cloud-token"><b>Token</b><input id="cloud-token" type="password" style="width:60%;text-align:left" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="github_pat_…" value="${c.token||''}"></label>
+   <div class="btns"><button class="btn" type="button" data-cloudrestore="1" id="cloudRestoreBtn">Buluttan geri yükle</button></div>
+   <div class="btns"><button class="btn" type="button" data-close="1">Vazgeç</button><button class="btn primary" type="button" data-cloudsave="1">Kaydet ve yedekle</button></div></div></div>`}
 function saveBlob(name,blob){const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000)}
 const $=id=>document.getElementById(id);
 const pad=n=>String(n).padStart(2,'0');
@@ -303,9 +344,11 @@ async function exportXlsx(){
 }
 
 document.addEventListener('click',e=>{
-  const el=e.target.closest('[data-open],[data-card],[data-set],[data-nav],[data-save],[data-del],[data-savebase],[data-close]');
+  const el=e.target.closest('[data-cloudsave],[data-cloudrestore],[data-open],[data-card],[data-set],[data-nav],[data-save],[data-del],[data-savebase],[data-close]');
   if(!el)return;
   if(el.dataset.close&&e.target!==el&&el.classList.contains('sheet-bg'))return;
+  if(el.dataset.cloudsave){const repo=$('cloud-repo').value.trim(),token=$('cloud-token').value.trim();if(!/^[\w.-]+\/[\w.-]+$/.test(repo)||!token){toast('Repo ve token gerekli');return}const old=cloudCfg()||{};setCloudCfg({...old,repo,token});closeSheet();cloudBackup(true);return}
+  if(el.dataset.cloudrestore){if(!confirmRestore){confirmRestore=true;el.textContent='Emin misin? Telefondaki veri değişir';return}const repo=$('cloud-repo').value.trim(),token=$('cloud-token').value.trim();if(repo&&token){const old=cloudCfg()||{};setCloudCfg({...old,repo,token})}cloudRestore();return}
   if(el.dataset.open){openSheet(el.dataset.open);return}
   if(el.dataset.card){openCard=openCard===el.dataset.card?null:el.dataset.card;render();return}
   if(el.dataset.set){const c=el.dataset.set,a=el.dataset.a;draft[c]=a==='off'?{...draft[c],status:'off',attended:0}:{...draft[c],status:'on',attended:+a};drawSheet();return}
@@ -319,7 +362,9 @@ $('xlsxBtn').addEventListener('click',exportXlsx);
 $('setBtn').addEventListener('click',openSettings);
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet()});
 
-loadStore();render();
+loadStore();render();renderCloud();
+$('cloudBtn').addEventListener('click',openCloud);
+{const c=cloudCfg();if(c&&c.token&&c.lastDay!==keyOf(new Date()))cloudBackup(false)}
 $('bakBtn').addEventListener('click',()=>saveBlob('yoklama_yedek_'+keyOf(new Date())+'.json',new Blob([JSON.stringify({history,entries},null,1)],{type:'application/json'})));
 $('bakIn').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;try{const o=JSON.parse(await f.text());if(!o.history||!o.entries)throw 0;history=o.history;entries=o.entries;persist();render();toast('Yedek yüklendi')}catch(_){toast('Dosya okunamadı')}e.target.value=''});
 </script>
