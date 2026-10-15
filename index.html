@@ -136,6 +136,26 @@ details.log[open] summary .arr{transform:rotate(90deg)}
 .srow{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .srow input{width:76px;font:inherit;font-family:var(--font-num);padding:7px 8px;border-radius:8px;border:1px solid var(--line);background:var(--surface2);color:var(--fg);text-align:right}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:999px;font-weight:700;font-size:13px;z-index:20}
+.cal{padding:12px 14px 14px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.calnav{display:flex;justify-content:space-between;align-items:center}
+.calnav button{border:1px solid var(--line);background:var(--surface2);border-radius:10px;width:36px;height:36px;font-weight:700;font-size:16px}
+.calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.calgrid .dow{font-size:10px;font-weight:800;color:var(--muted);text-align:center;letter-spacing:.05em;padding-bottom:2px}
+.cd{aspect-ratio:1;min-width:0;border:0;border-radius:9px;background:transparent;font-family:var(--font-num);font-size:13px;font-weight:700;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--muted);padding:0}
+.cd i,.lg{display:inline-block;width:7px;height:7px;border-radius:50%;background:transparent;box-sizing:border-box}
+.cd.has{background:var(--surface2);color:var(--fg)}
+.full i,.lg.full{background:var(--ok)} .part i,.lg.part{background:var(--warn)} .miss i,.lg.miss{background:var(--crit)} .todo i,.lg.todo{border:1.5px solid var(--muted)} .off i,.lg.off{background:var(--muted)}
+.cd.today{outline:2px solid var(--accent);outline-offset:-2px}
+.cd:disabled{cursor:default}
+.cd.has:disabled{opacity:.45}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+td.ed{cursor:pointer;text-decoration:underline dotted var(--line);text-underline-offset:3px}
+td.ed:hover{background:var(--surface2)}
+.stepper{display:flex;align-items:center;justify-content:center;gap:18px;padding:6px 0}
+.stepper button{width:52px;height:52px;border-radius:14px;border:1px solid var(--line);background:var(--surface);font-size:24px;font-weight:700}
+.stepper b{font-family:var(--font-num);font-size:40px;min-width:60px;text-align:center}
+.daylist{display:flex;flex-wrap:wrap;gap:8px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -148,7 +168,8 @@ details.log[open] summary .arr{transform:rotate(90deg)}
   <div id="todayBox"></div>
   <div class="section"><div class="label">Dersler · devamsızlık / hak</div><div class="cards" id="cards"></div></div>
   <div class="section"><div class="label">Haftalık devamsızlık (saat)</div><div class="tablewrap" id="table"></div>
-    <div class="foot">1. hafta derslere gelmedin, o hafta devamsızlığa sayılmadı. Hak = haftalık saat × 12 × %30, aşağı yuvarlanır.</div></div>
+    <div class="foot">Bir hücreye dokunarak o haftanın sayısını değiştirebilirsin. 1. hafta derslere gelmedin, o hafta devamsızlığa sayılmadı. Hak = haftalık saat × 12 × %30, aşağı yuvarlanır.</div></div>
+  <details class="log" id="calBox"><summary><span>Takvim</span><span class="arr">›</span></summary><div class="cal" id="cal"></div></details>
   <details class="log" id="log"><summary><span id="logTitle">Günlük</span><span class="arr">›</span></summary><div class="loglist" id="logList"></div></details>
   <div class="actions">
     <button class="btn primary" id="xlsxBtn" type="button">Excel indir</button>
@@ -190,21 +211,27 @@ function cloudCfg(){try{return JSON.parse(localStorage.getItem(CK)||'null')}catc
 function setCloudCfg(c){try{localStorage.setItem(CK,JSON.stringify(c))}catch(e){}}
 const b64e=s=>btoa(unescape(encodeURIComponent(s)));
 const b64d=s=>decodeURIComponent(escape(atob(s.replace(/\s/g,''))));
-function gh(c,method,body){return fetch('https://api.github.com/repos/'+c.repo+'/contents/data.json',{method,cache:'no-store',headers:{Authorization:'Bearer '+c.token,Accept:'application/vnd.github+json'},body:body?JSON.stringify(body):undefined})}
+function gh(c,method,body,path){return fetch('https://api.github.com/repos/'+c.repo+'/contents/'+(path||'data.json'),{method,cache:'no-store',headers:{Authorization:'Bearer '+c.token,Accept:'application/vnd.github+json'},body:body?JSON.stringify(body):undefined})}
+const KEEP_DAYS=7;
+async function putFile(c,path,content,message){let sha;const g=await gh(c,'GET',null,path);if(g.ok)sha=(await g.json()).sha;else if(g.status!==404)throw new Error(g.status===401?'token geçersiz':'HTTP '+g.status);
+  const r=await gh(c,'PUT',{message,content,sha},path);if(!r.ok)throw new Error(r.status===404?'repo bulunamadı':r.status===403?'token yazma izni yok':'HTTP '+r.status)}
+async function listSnaps(c){const g=await gh(c,'GET',null,'yedek');if(!g.ok)return [];const a=await g.json();return Array.isArray(a)?a.filter(f=>/^\d{4}-\d{2}-\d{2}\.json$/.test(f.name)).sort((x,y)=>y.name.localeCompare(x.name)):[]}
+async function pruneSnaps(c){const lim=new Date();lim.setDate(lim.getDate()-KEEP_DAYS);const cut=keyOf(lim);
+  const all=await listSnaps(c);for(let i=KEEP_DAYS;i<all.length;i++){const f=all[i];if(f.name.slice(0,10)<cut){await gh(c,'DELETE',{message:'Eski yedek silindi '+f.name,sha:f.sha},'yedek/'+f.name)}}}
 let cloudTimer=null,cloudErr='';
 function scheduleCloud(){const c=cloudCfg();if(!c||!c.token)return;clearTimeout(cloudTimer);cloudTimer=setTimeout(()=>cloudBackup(false),1500)}
 async function cloudBackup(manual){
   const c=cloudCfg();if(!c||!c.token){if(manual)toast('Önce bulut ayarlarını gir');return false}
-  try{let sha;const g=await gh(c,'GET');
-    if(g.ok)sha=(await g.json()).sha;else if(g.status!==404)throw new Error(g.status===401?'token geçersiz':'HTTP '+g.status);
-    const now=new Date();const content=b64e(JSON.stringify({history,entries,savedAt:now.toISOString()},null,1));
-    const r=await gh(c,'PUT',{message:'Yoklama yedek '+keyOf(now)+' '+pad(now.getHours())+':'+pad(now.getMinutes()),content,sha});
-    if(!r.ok)throw new Error(r.status===404?'repo bulunamadı':r.status===403?'token yazma izni yok':'HTTP '+r.status);
+  try{const now=new Date();const day=keyOf(now);const stamp=day+' '+pad(now.getHours())+':'+pad(now.getMinutes());
+    const content=b64e(JSON.stringify({history,entries,savedAt:now.toISOString()},null,1));
+    await putFile(c,'data.json',content,'Yoklama yedek '+stamp);
+    await putFile(c,'yedek/'+day+'.json',content,'Günlük yedek '+stamp);
+    if(c.prunedDay!==day){try{await pruneSnaps(c);c.prunedDay=day}catch(_){}}
     c.last=now.toISOString();c.lastDay=keyOf(now);setCloudCfg(c);cloudErr='';renderCloud();if(manual)toast('Buluta yedeklendi');return true}
   catch(e){cloudErr=e.message||'bağlantı yok';renderCloud();if(manual)toast('Yedeklenemedi: '+cloudErr);return false}}
-async function cloudRestore(){
+async function cloudRestore(path){
   const c=cloudCfg();if(!c||!c.token){toast('Önce bulut ayarlarını gir');return}
-  try{const g=await gh(c,'GET');if(!g.ok)throw new Error(g.status===404?'yedek yok':'HTTP '+g.status);
+  try{const g=await gh(c,'GET',null,path);if(!g.ok)throw new Error(g.status===404?'yedek yok':'HTTP '+g.status);
     const o=JSON.parse(b64d((await g.json()).content));if(!o.history||!o.entries)throw new Error('dosya bozuk');
     history=o.history;entries=o.entries;try{localStorage.setItem(LS_KEY,JSON.stringify({history,entries}))}catch(e){}
     render();toast('Buluttan geri yüklendi');closeSheet()}catch(e){toast('Geri yüklenemedi: '+e.message)}}
@@ -213,13 +240,19 @@ function renderCloud(){const el=document.getElementById('cloudLbl');if(!el)retur
   if(cloudErr){el.textContent='Bulut yedek hatası: '+cloudErr;return}
   if(c.last){const d=new Date(c.last);el.textContent='Son bulut yedeği: '+d.getDate()+' '+MONTHS[d.getMonth()]+' '+pad(d.getHours())+':'+pad(d.getMinutes())+' · '+c.repo}else el.textContent='Bulut yedek açık · '+c.repo}
 let confirmRestore=false;
-function openCloud(){const c=cloudCfg()||{};confirmRestore=false;
+async function loadSnapList(){const el=document.getElementById('snapList');if(!el)return;const c=cloudCfg();
+  if(!c||!c.token){el.innerHTML='<div class="q">Token girince burada görünür.</div>';return}
+  try{const a=await listSnaps(c);if(!document.getElementById('snapList'))return;
+    el.innerHTML=a.length?a.map(f=>{const d=fromKey(f.name.slice(0,10));return `<div class="srow"><b>${nice(d)}</b><button class="btn" type="button" data-cloudrestore="yedek/${f.name}">Geri yükle</button></div>`}).join(''):'<div class="q">Henüz günlük yedek yok.</div>'}
+  catch(e){el.innerHTML='<div class="q">Liste alınamadı.</div>'}}
+function openCloud(){const c=cloudCfg()||{};confirmRestore=false;setTimeout(loadSnapList,0);
   $('sheetHost').innerHTML=`<div class="sheet-bg" data-close="1"><div class="sheet" role="dialog" aria-label="Bulut yedek">
    <h3>Bulut yedek (GitHub)</h3>
    <div class="q">Her kayıttan sonra ve her gün ilk açılışta veriler private bir GitHub reposuna data.json olarak yazılır. Her yedek ayrı commit, yani geçmiş günlere dönebilirsin.</div>
    <label class="srow" for="cloud-repo"><b>Repo</b><input id="cloud-repo" type="text" style="width:60%;text-align:left" autocapitalize="off" autocorrect="off" spellcheck="false" value="${c.repo||'Efe-Demir/yoklama-data'}"></label>
    <label class="srow" for="cloud-token"><b>Token</b><input id="cloud-token" type="password" style="width:60%;text-align:left" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="github_pat_…" value="${c.token||''}"></label>
-   <div class="btns"><button class="btn" type="button" data-cloudrestore="1" id="cloudRestoreBtn">Buluttan geri yükle</button></div>
+   <div class="btns"><button class="btn" type="button" data-cloudrestore="data.json" id="cloudRestoreBtn">Son yedeği geri yükle</button></div>
+   <div class="label">Günlük yedekler (son 7 gün)</div><div class="settings" id="snapList"><div class="q">Yükleniyor…</div></div>
    <div class="btns"><button class="btn" type="button" data-close="1">Vazgeç</button><button class="btn primary" type="button" data-cloudsave="1">Kaydet ve yedekle</button></div></div></div>`}
 function saveBlob(name,blob){const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000)}
 const $=id=>document.getElementById(id);
@@ -268,11 +301,12 @@ function render(){
       <div class="meta"><span>Girilen ders</span><b>${att[c]} saat</b></div>${det}</button>`}).join('');
   // tablo
   let tb='<table><thead><tr><th>Hafta</th>'+COURSES.map(x=>`<th>${x.c}</th>`).join('')+'<th>Toplam</th></tr></thead><tbody>';
-  for(let i=1;i<=curWk;i++){let s=0;tb+=`<tr class="${i===wk?'cur':''}"><td>${i}. hafta</td>`+COURSES.map(({c})=>{const v=abs[c][i]||0;s+=v;return `<td class="${v?'':'zero'}">${v||'·'}</td>`}).join('')+`<td class="sum">${s||'·'}</td></tr>`}
+  for(let i=1;i<=curWk;i++){let s=0;tb+=`<tr class="${i===wk?'cur':''}"><td>${i}. hafta</td>`+COURSES.map(({c})=>{const v=abs[c][i]||0;s+=v;return `<td class="ed ${v?'':'zero'}" data-wk="${c}|${i}">${v||'·'}</td>`}).join('')+`<td class="sum">${s||'·'}</td></tr>`}
   const all=COURSES.reduce((a,{c})=>a+tot[c],0);
   tb+='<tr class="tot"><td>Toplam</td>'+COURSES.map(({c})=>`<td>${tot[c]}</td>`).join('')+`<td>${all}</td></tr>`;
   tb+='<tr class="lim"><td>Hak</td>'+COURSES.map(({lim})=>`<td>${lim}</td>`).join('')+'<td></td></tr></tbody></table>';
   $('table').innerHTML=tb;
+  renderCal();
   // günlük
   const keys=Object.keys(entries).sort().reverse();
   $('logTitle').textContent=`Günlük · ${keys.length} kayıt`;
@@ -286,6 +320,39 @@ function render(){
 // yoklama paneli
 let sheetKey=null,draft={},confirmDel=false;
 function openSheet(k){sheetKey=k;confirmDel=false;const d=fromKey(k),e=entries[k];draft={};(SCHED[d.getDay()]||[]).forEach(([c,h])=>{const it=e&&e.items&&e.items[c];draft[c]=it?{...it}:{status:'on',sched:h,attended:h}});drawSheet()}
+
+const MONTHS_FULL=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+let calMonth=null;
+function dayStatus(k,d){const sch=SCHED[d.getDay()]||[];if(!sch.length)return '';const e=entries[k];
+  if(!e)return (k>=TRACK_FROM&&k<=keyOf(logicalToday()))?'todo':'';
+  let s=0,a=0,on=0;for(const c in (e.items||{})){const it=e.items[c];if(it.status==='off')continue;on++;s+=+it.sched||0;a+=+it.attended||0}
+  if(!on)return 'off';return a>=s?'full':a===0?'miss':'part'}
+function renderCal(){const t=logicalToday(),tk=keyOf(t);if(!calMonth)calMonth=new Date(t.getFullYear(),t.getMonth(),1);
+  const y=calMonth.getFullYear(),m=calMonth.getMonth(),off=(new Date(y,m,1).getDay()+6)%7,n=new Date(y,m+1,0).getDate();
+  let h=`<div class="calnav"><button type="button" data-cal="-1" aria-label="Önceki ay">‹</button><b>${MONTHS_FULL[m]} ${y}</b><button type="button" data-cal="1" aria-label="Sonraki ay">›</button></div><div class="calgrid">`+['Pzt','Sal','Çar','Per','Cum','Cmt','Paz'].map(x=>`<div class="dow">${x}</div>`).join('');
+  for(let i=0;i<off;i++)h+='<div></div>';
+  for(let dd=1;dd<=n;dd++){const d=new Date(y,m,dd),k=keyOf(d),has=(SCHED[d.getDay()]||[]).length>0,st=dayStatus(k,d),dis=!has||k>tk||d<TERM_START;
+    h+=`<button type="button" class="cd${has?' has':''} ${st}${k===tk?' today':''}" data-open="${k}"${dis?' disabled':''} aria-label="${nice(d)}">${dd}<i></i></button>`}
+  h+='</div><div class="legend"><span><i class="lg full"></i>Girdim</span><span><i class="lg part"></i>Kısmen</span><span><i class="lg miss"></i>Girmedim</span><span><i class="lg todo"></i>İşaretlenmedi</span><span><i class="lg off"></i>Ders yok</span></div>';
+  $('cal').innerHTML=h}
+let wEdit=null;
+function weekDays(w){const out=[];const mon=new Date(TERM_START);mon.setDate(mon.getDate()+(w-1)*7);for(let i=0;i<5;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);out.push(d)}return out}
+function openWeek(c,w){const course=COURSES.find(x=>x.c===c);let daily=0;
+  for(const k in entries){if(weekOf(fromKey(k))!==w)continue;const it=(entries[k].items||{})[c];if(it&&it.status!=='off')daily+=Math.max(0,(+it.sched||0)-(+it.attended||0))}
+  const hist=Number(((history[c]||{}).weeks||{})[w]||0);wEdit={c,w,daily,val:hist+daily,max:course.w};drawWeek()}
+function drawWeek(){const {c,w,daily,val}=wEdit;const tk=keyOf(logicalToday());
+  const days=weekDays(w).filter(d=>(SCHED[d.getDay()]||[]).some(x=>x[0]===c)&&keyOf(d)<=tk);
+  $('sheetHost').innerHTML=`<div class="sheet-bg" data-close="1"><div class="sheet" role="dialog" aria-label="Haftalık devamsızlık">
+   <h3>${c} · ${w}. hafta</h3>
+   <div class="q">Bu haftaki toplam devamsızlık (saat). Haftalık ders ${wEdit.max} saat.${daily?` Günlük kayıtlardan ${daily} saat geliyor, daha aşağı indirmek için günü aç.`:''}</div>
+   <div class="stepper"><button type="button" data-wstep="-1" aria-label="Azalt">−</button><b id="wval">${val}</b><button type="button" data-wstep="1" aria-label="Arttır">+</button></div>
+   ${days.length?`<div class="label">Bu haftanın günleri</div><div class="daylist">${days.map(d=>`<button class="btn" type="button" data-open="${keyOf(d)}">${nice(d)}</button>`).join('')}</div>`:''}
+   <div class="btns"><button class="btn" type="button" data-close="1">Vazgeç</button><button class="btn primary" type="button" data-wsave="1">Kaydet</button></div></div></div>`}
+async function saveWeek(){const {c,w,daily,val}=wEdit;const h=history[c]||{course:c,weeks:{},attendedBase:0};const weeks={...(h.weeks||{})};
+  const nh=val-daily;if(nh<0){toast('Günlük kayıtlar '+daily+' saat, önce günü düzenle');return}
+  if(nh===0)delete weeks[w];else weeks[w]=nh;
+  if(history[c])await db.collection('history').doc(c).update({weeks});else await db.collection('history').doc(c).set({...h,weeks});
+  toast('Kaydedildi');closeSheet()}
 function closeSheet(){sheetKey=null;$('sheetHost').innerHTML=''}
 function drawSheet(){
   const d=fromKey(sheetKey),list=SCHED[d.getDay()]||[],e=entries[sheetKey];
@@ -295,6 +362,7 @@ function drawSheet(){
     :'<div class="crow"><div class="q">Bu gün programda ders yok.</div></div>';
   $('sheetHost').innerHTML=`<div class="sheet-bg" data-close="1"><div class="sheet" role="dialog" aria-label="Yoklama">
     <div class="dnav"><button type="button" data-nav="-1" aria-label="Önceki gün">‹</button><div class="dt"><b>${nice(d)}</b><span>${weekOf(d)}. hafta${e?' · kayıtlı':''}</span></div><button type="button" data-nav="1" aria-label="Sonraki gün">›</button></div>
+    ${sheetKey<TRACK_FROM?'<div class="q">Bu tarihin haftası toplam olarak girildi. Buradan kaydedersen o haftanın sayısına eklenir. Sadece haftalık sayıyı düzeltmek için tablodaki hücreye dokun.</div>':''}
     ${rows}
     <div class="btns">${e?`<button class="btn danger" type="button" data-del="1">${confirmDel?'Silmeyi onayla':'Kaydı sil'}</button>`:''}<button class="btn" type="button" data-close="1">Vazgeç</button>${list.length?'<button class="btn primary" type="button" data-save="1">Kaydet</button>':''}</div>
   </div></div>`;
@@ -344,11 +412,15 @@ async function exportXlsx(){
 }
 
 document.addEventListener('click',e=>{
-  const el=e.target.closest('[data-cloudsave],[data-cloudrestore],[data-open],[data-card],[data-set],[data-nav],[data-save],[data-del],[data-savebase],[data-close]');
+  const el=e.target.closest('[data-wk],[data-wstep],[data-wsave],[data-cal],[data-cloudsave],[data-cloudrestore],[data-open],[data-card],[data-set],[data-nav],[data-save],[data-del],[data-savebase],[data-close]');
   if(!el)return;
   if(el.dataset.close&&e.target!==el&&el.classList.contains('sheet-bg'))return;
   if(el.dataset.cloudsave){const repo=$('cloud-repo').value.trim(),token=$('cloud-token').value.trim();if(!/^[\w.-]+\/[\w.-]+$/.test(repo)||!token){toast('Repo ve token gerekli');return}const old=cloudCfg()||{};setCloudCfg({...old,repo,token});closeSheet();cloudBackup(true);return}
-  if(el.dataset.cloudrestore){if(!confirmRestore){confirmRestore=true;el.textContent='Emin misin? Telefondaki veri değişir';return}const repo=$('cloud-repo').value.trim(),token=$('cloud-token').value.trim();if(repo&&token){const old=cloudCfg()||{};setCloudCfg({...old,repo,token})}cloudRestore();return}
+  if(el.dataset.cloudrestore){if(confirmRestore!==el){confirmRestore=el;el.textContent='Emin misin? Dokun';return}const repo=$('cloud-repo').value.trim(),token=$('cloud-token').value.trim();if(repo&&token){const old=cloudCfg()||{};setCloudCfg({...old,repo,token})}cloudRestore(el.dataset.cloudrestore);return}
+  if(el.dataset.wk){const [c,w]=el.dataset.wk.split('|');openWeek(c,+w);return}
+  if(el.dataset.wstep){wEdit.val=Math.min(wEdit.max,Math.max(0,wEdit.val+Number(el.dataset.wstep)));$('wval').textContent=wEdit.val;return}
+  if(el.dataset.wsave){saveWeek();return}
+  if(el.dataset.cal){calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth()+Number(el.dataset.cal),1);renderCal();return}
   if(el.dataset.open){openSheet(el.dataset.open);return}
   if(el.dataset.card){openCard=openCard===el.dataset.card?null:el.dataset.card;render();return}
   if(el.dataset.set){const c=el.dataset.set,a=el.dataset.a;draft[c]=a==='off'?{...draft[c],status:'off',attended:0}:{...draft[c],status:'on',attended:+a};drawSheet();return}
