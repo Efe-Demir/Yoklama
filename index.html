@@ -186,9 +186,9 @@ td.ed:hover{background:var(--surface2)}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const COURSES=[{c:'EE303',w:3},{c:'MATH380',w:4},{c:'MECE303',w:4},{c:'IE220',w:3},{c:'FE301',w:3}];
+const COURSES=[{c:'EE303',w:3},{c:'MATH380',w:4},{c:'MECE303',w:4},{c:'IE220',w:3},{c:'FE301',w:3},{c:'MAN313',w:3}];
 COURSES.forEach(x=>x.lim=Math.floor(x.w*12*0.3+1e-9));
-const SCHED={1:[['EE303',3,'09:30–12:20']],2:[['MATH380',1,'10:30–11:20']],3:[['MATH380',3,'09:30–12:20'],['MECE303',2,'12:30–14:20']],4:[['IE220',3,'09:30–12:20'],['FE301',3,'14:30–17:20']],5:[['MECE303',2,'11:30–13:20']]};
+const SCHED={1:[['EE303',3,'09:30–12:20']],2:[['MATH380',1,'10:30–11:20']],3:[['MATH380',3,'09:30–12:20'],['MECE303',2,'12:30–14:20'],['MAN313',3,'14:30–17:20']],4:[['IE220',3,'09:30–12:20'],['FE301',3,'14:30–17:20']],5:[['MECE303',2,'11:30–13:20']]};
 const TERM_START=new Date(2026,8,14); // 1. hafta pazartesi
 const TRACK_FROM='2026-10-14';
 const WEEKS=14;
@@ -199,7 +199,8 @@ let db, downloads=true, entries={}, history={}, openCard=null, dbState='wait';
 
 const LS_KEY='yoklama_v1';const SEED={"history":{"EE303":{"course":"EE303","weeks":{},"attendedBase":12},"MATH380":{"course":"MATH380","weeks":{"2":4,"3":2,"4":1},"attendedBase":6},"MECE303":{"course":"MECE303","weeks":{"4":2},"attendedBase":10},"IE220":{"course":"IE220","weeks":{"2":1,"3":1,"4":1},"attendedBase":6},"FE301":{"course":"FE301","weeks":{},"attendedBase":9}},"entries":{"2026-10-14":{"date":"2026-10-14","week":5,"items":{"MATH380":{"attended":2,"sched":3,"status":"on"},"MECE303":{"attended":0,"sched":2,"status":"on"}}}}};
 function persist(){try{localStorage.setItem(LS_KEY,JSON.stringify({history,entries}))}catch(e){toast('Kaydedilemedi: tarayıcı depolaması kapalı')}scheduleCloud()}
-function loadStore(){let o=null;try{o=JSON.parse(localStorage.getItem(LS_KEY)||'null')}catch(e){}if(!o){o=JSON.parse(JSON.stringify(SEED));try{localStorage.setItem(LS_KEY,JSON.stringify(o))}catch(e){}}history=o.history||{};entries=o.entries||{};dbState='ok'}
+function loadStore(){let o=null;try{o=JSON.parse(localStorage.getItem(LS_KEY)||'null')}catch(e){}if(!o){o=JSON.parse(JSON.stringify(SEED));try{localStorage.setItem(LS_KEY,JSON.stringify(o))}catch(e){}}history=o.history||{};entries=o.entries||{};dbState='ok';
+  if(!history.MAN313){history.MAN313={course:'MAN313',weeks:{'4':3},attendedBase:6};try{localStorage.setItem(LS_KEY,JSON.stringify({history,entries}))}catch(e){}}}
 db={collection:name=>({doc:id=>({
   set:async data=>{(name==='entries'?entries:history)[id]=data;persist();render()},
   update:async data=>{const t=name==='entries'?entries:history;t[id]={...(t[id]||{}),...data};persist();render()},
